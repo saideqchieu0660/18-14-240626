@@ -2960,10 +2960,7 @@ ${reminderSuffix}`;
 
         const isJsonMode = exactCount === undefined && targetMin !== undefined && targetMax !== undefined;
 
-        let activePrompt = "";
-
-        if (isJsonMode) {
-          const jsonNormalPrompt = `You are an elite English-Vietnamese lexicographer and academic vocabulary trainer. Your goal is to identify and extract ALL prominent vocabulary words, academic terms, useful collocations, or idiomatic expressions from this source text into highly educational flashcards.
+        const jsonNormalPrompt = `You are an elite English-Vietnamese lexicographer and academic vocabulary trainer. Your goal is to identify and extract ALL prominent vocabulary words, academic terms, useful collocations, or idiomatic expressions from this source text into highly educational flashcards.
 
 CRITICAL INSTRUCTION: You MUST extract EVERYTHING comprehensively. DO NOT SKIP, DO NOT SUMMARIZE. If the input is a list of terms or a dense document, you MUST generate a flashcard for EVERY SINGLE VALID TERM present in the text. Ensure zero data loss.
 
@@ -2989,7 +2986,7 @@ If the 'front' field consists of ONLY ONE word (no spaces), you MUST NOT label i
 Original Source Text:
 ${textChunk}`;
 
-          const jsonDegradedPrompt = `Extract ALL vocabulary words from this text comprehensively without dropping any data.
+        const jsonDegradedPrompt = `Extract ALL vocabulary words from this text comprehensively without dropping any data.
 Provide ONLY valid JSON.
 \`\`\`json
 {
@@ -3011,12 +3008,8 @@ If the 'front' field consists of ONLY ONE word (no spaces), you MUST NOT label i
 Original Text:
 ${textChunk}`;
 
-          activePrompt = isDegraded ? jsonDegradedPrompt : jsonNormalPrompt;
-
-        } else {
-          // Exact text line mode
-          const exactCountValue = exactCount || 5;
-          const normalPrompt = `You are an AI data processor acting as a sequential compiler.
+        const exactCountValue = exactCount || 5;
+        const exactLinePrompt = `You are an AI data processor acting as a sequential compiler.
 
 STRICT FORMAT & COUNT INSTRUCTIONS:
 The input contains EXACTLY ${exactCountValue} items (lines/chunks). You MUST process EVERY SINGLE ITEM sequentially, 1-to-1.
@@ -3038,279 +3031,102 @@ Rule Checklist:
 Original Source Text:
 ${textChunk}`;
 
-          const degradedPrompt = `You are an AI data processor acting as a sequential compiler.
+        const activePrompt = isJsonMode ? (isDegraded ? jsonDegradedPrompt : jsonNormalPrompt) : exactLinePrompt;
 
-STRICT FORMAT & COUNT INSTRUCTIONS:
-The input contains EXACTLY ${exactCountValue} items (lines/chunks). You MUST process EVERY SINGLE ITEM sequentially, 1-to-1.
-DO NOT FILTER. DO NOT SKIP. DO NOT SUMMARIZE. Even if a word seems trivial or non-academic, YOU MUST include it.
-You MUST return EXACTLY ${exactCountValue} flashcard records.
+        const responseTextObj = await executeGenerateContentRoundRobin(activePrompt, {
+          responseMimeType: isJsonMode ? "application/json" : "text/plain",
+          temperature: 0.1
+        });
 
-DO NOT OUTPUT JSON! You MUST output plain text where each line represents exactly one flashcard.
-Use the exact delimiter ' ||| ' between fields.
-The format for each line MUST be:
-front ||| ipa ||| wordForm ||| back (must be in Vietnamese)
-
-(IMPORTANT: Drop 'example' and 'origin' fields completely).
-
-Rule Checklist:
-1. Return ONLY pure text, ONE card per line.
-2. NO markdown wrapper. NO prefixes like "-".
-3. Every line MUST contain exactly 3 ' ||| ' delimiters separating the 4 fields.
-4. If a field is empty (like a missing IPA), leave it blank but KEEP the delimiters!
-5. If the 'front' field consists of ONLY ONE word (no spaces), you MUST NOT label its 'wordForm' as 'idiom', 'collocation', or 'phrasal verb'.
-
-Original Source Text:
-${textChunk}`;
-
-          activePrompt = isDegraded ? degradedPrompt : normalPrompt;
-        }
-
-        const shouldStream = req.body.stream === true;
-        if (shouldStream) {
-          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-          res.setHeader('Transfer-Encoding', 'chunked');
-          res.setHeader('Cache-Control', 'no-cache');
-          res.setHeader('Connection', 'keep-alive');
-
-          try {
-            await executeGeminiWithRetry(async (ai, keyState) => {
-              const responseStream = await ai.models.generateContentStream({
-                model: "gemini-2.5-flash",
-                contents: activePrompt,
-                config: {
-                  responseMimeType: isJsonMode ? "application/json" : "text/plain",
-                  temperature: 0.1,
-                  maxOutputTokens: 8192,
-                }
-              });
-
-              for await (const chunk of responseStream) {
-                if (chunk.text) {
-                  res.write(chunk.text);
-                }
-              }
-            });
-            res.end();
-            return;
-          } catch (streamErr: any) {
-            console.error("Streaming endpoint error:", streamErr);
-            res.write(JSON.stringify({ error: true, message: streamErr.message }));
-            res.end();
-            return;
+        responseText = "";
+        if (typeof responseTextObj === "string") {
+          responseText = responseTextObj;
+        } else if (responseTextObj && typeof responseTextObj === "object") {
+          responseText = (responseTextObj as any).text || "";
+          if ((responseTextObj as any).tokenUsage) {
+            tokenUsageData = (responseTextObj as any).tokenUsage;
+          }
+          if ((responseTextObj as any).keyState) {
+            usedKeyState = (responseTextObj as any).keyState;
           }
         }
 
-        let activeProviders = [];
-        if (isGroqEnabled && groqKeyStates.length > 0) activeProviders.push("groq");
-        if (isOpenRouterEnabled && openRouterKeyStates.length > 0) activeProviders.push("openrouter");
-        if (isGeminiEnabled && geminiKeyStates.length > 0) activeProviders.push("gemini");
-
-        let success = false;
-        let attempt = 0;
-        let maxAttempts = Math.max(10, (isGroqEnabled ? groqKeyStates.length : 0) + (isOpenRouterEnabled ? openRouterKeyStates.length : 0) + (isGeminiEnabled ? geminiKeyStates.length : 0));
-
-        let startProviderIndex = 0;
-        if (activeProviders.length > 1) {
-           startProviderIndex = processChunkGlobalProviderIndex;
-           processChunkGlobalProviderIndex = (processChunkGlobalProviderIndex + 1) % activeProviders.length;
+        let cleanText = responseText.trim();
+        if (cleanText.startsWith("```json")) {
+          cleanText = cleanText.substring(7);
+        } else if (cleanText.startsWith("```")) {
+          cleanText = cleanText.substring(3);
         }
-
-        const numProviders = activeProviders.length;
-        for (let pIdx = 0; pIdx < numProviders && !success; pIdx++) {
-          const providerIndex = (startProviderIndex + pIdx) % numProviders;
-          const provider = activeProviders[providerIndex];
-
-          try {
-            if (provider === "groq") {
-              const numKeys = groqKeyStates.length;
-              for (let kIdx = 0; kIdx < numKeys && !success; kIdx++) {
-                const { key, state } = getGroqKey();
-                const groqController = new AbortController();
-                const groqTimeoutId = setTimeout(() => groqController.abort(), 60000);
-                try {
-                  const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      "Authorization": `Bearer ${key}`
-                    },
-                    body: JSON.stringify({
-                      model: "llama-3.3-70b-versatile",
-                      messages: [{ role: "user", content: activePrompt }],
-                      temperature: 0.1,
-                      max_completion_tokens: 8192,
-                      ...(isJsonMode ? { response_format: { type: "json_object" } } : {})
-                    }),
-                    signal: groqController.signal
-                  });
-                  clearTimeout(groqTimeoutId);
-
-                  if (!groqRes.ok) throw new Error(`Groq API Error: ${groqRes.status}`);
-                  const data = await groqRes.json();
-                  responseText = data?.choices?.[0]?.message?.content || "";
-                  if (responseText) {
-                    usedKeyState = { index: state.index, maskedKey: state.maskedKey, provider: "groq" };
-                    success = true;
-                    addGroqRotationLog({
-                       toKeyIndex: state.index,
-                       reason: "Pipeline process-chunk generated successfully (200 OK)"
-                    });
-                    if (data.usage) {
-                      tokenUsageData = {
-                        promptTokens: data.usage.prompt_tokens || 0,
-                        completionTokens: data.usage.completion_tokens || 0,
-                        totalTokens: data.usage.total_tokens || 0
-                      };
-                    }
-                  }
-                } catch (groqErr) {
-                  handleGroqError(state, groqErr);
-                  console.warn(`RoundRobin[Groq] inner loop attempt failed, key ${state.index}`);
-                }
-              }
-            } else if (provider === "openrouter") {
-              const numKeys = openRouterKeyStates.length;
-              for (let kIdx = 0; kIdx < numKeys && !success; kIdx++) {
-                const { key, state } = getOpenRouterKey();
-                const openRouterController = new AbortController();
-                const openRouterTimeoutId = setTimeout(() => openRouterController.abort(), 60000);
-                try {
-                  const openRouterRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      "Authorization": `Bearer ${key}`,
-                      "HTTP-Referer": "http://localhost:3000",
-                      "X-Title": "Henosis Learning App"
-                    },
-                    body: JSON.stringify({
-                      model: "google/gemini-2.5-flash:free",
-                      messages: [{ role: "user", content: activePrompt }],
-                      temperature: 0.1,
-                      ...(isJsonMode ? { response_format: { type: "json_object" } } : {})
-                    }),
-                    signal: openRouterController.signal
-                  });
-                  clearTimeout(openRouterTimeoutId);
-
-                  if (!openRouterRes.ok) throw new Error(`OpenRouter API Error: ${openRouterRes.status}`);
-                  const data = await openRouterRes.json();
-                  responseText = data?.choices?.[0]?.message?.content || "";
-                  if (responseText) {
-                    usedKeyState = { index: state.index, maskedKey: state.maskedKey, provider: "openrouter" };
-                    success = true;
-                    addOpenRouterRotationLog({
-                       toKeyIndex: state.index,
-                       reason: "Pipeline process-chunk generated successfully (200 OK)"
-                    });
-                    if (data.usage) {
-                      tokenUsageData = {
-                        promptTokens: data.usage.prompt_tokens || 0,
-                        completionTokens: data.usage.completion_tokens || 0,
-                        totalTokens: data.usage.total_tokens || 0
-                      };
-                    }
-                  }
-                } catch (openRouterErr) {
-                  handleOpenRouterError(state, openRouterErr);
-                  console.warn(`RoundRobin[OpenRouter] inner loop attempt failed, key ${state.index}`);
-                }
-              }
-            } else if (provider === "gemini") {
-              const numKeys = geminiKeyStates.length;
-              for (let kIdx = 0; kIdx < numKeys && !success; kIdx++) {
-                const { ai, state } = getGeminiClient();
-                state.usageCount++;
-                state.lastUsed = new Date();
-                updateKeyMetrics(state.index, "usage");
-                
-                try {
-                  const timeoutPromise = new Promise<never>((_, reject) => 
-                    setTimeout(() => reject(new Error("Gemini API Timeout (60s)")), 60000)
-                  );
-                  
-                  const response = await Promise.race([
-                    ai.models.generateContent({
-                      model: "gemini-2.5-flash",
-                      contents: activePrompt,
-                      config: {
-                        responseMimeType: isJsonMode ? "application/json" : "text/plain",
-                        temperature: 0.1,
-                        maxOutputTokens: 8192,
-                      }
-                    }),
-                    timeoutPromise
-                  ]);
-
-                  responseText = response.text;
-                  if (responseText) {
-                    usedKeyState = { ...state, provider: "gemini" };
-                    success = true;
-                    addRotationLog({
-                       toKeyIndex: state.index,
-                       reason: "Pipeline process-chunk generated successfully (200 OK)"
-                    });
-                    if (response.usageMetadata) {
-                      tokenUsageData = {
-                        promptTokens: response.usageMetadata.promptTokenCount || 0,
-                        completionTokens: response.usageMetadata.candidatesTokenCount || 0,
-                        totalTokens: response.usageMetadata.totalTokenCount || 0
-                      };
-                    }
-                  }
-                } catch (geminiErr: any) {
-                  handleGeminiError(state, geminiErr);
-                  console.warn(`RoundRobin[Gemini] inner loop attempt failed, key ${state.index}`);
-                }
-              }
-            }
-          } catch (e) {
-             console.error(`RoundRobin execution failed for ${provider}:`, e);
-          }
+        if (cleanText.endsWith("```")) {
+          cleanText = cleanText.substring(0, cleanText.length - 3);
         }
-        
-        if (!success || !responseText) {
-           throw new Error("Tất cả Cổng API khả dụng đều phản hồi thất bại hoặc không có kết quả hợp lệ.");
-        }
-
-        let cleanText = (responseText as string).trim();
-        if (cleanText.startsWith("\`\`\`")) {
-          // Remove wrapping markdown block if any
-          const lines = cleanText.split("\n");
-          if (lines.length > 2) {
-             lines.shift();
-             lines.pop();
-             cleanText = lines.join("\n").trim();
-          }
-        }
+        cleanText = cleanText.trim();
 
         if (isJsonMode) {
-          let parsedData: any;
+          let parsedData: any = null;
+          let extractedCards: any[] = [];
           try {
              parsedData = JSON.parse(cleanText);
+             if (parsedData) {
+                if (Array.isArray(parsedData)) {
+                   extractedCards = parsedData;
+                } else if (parsedData && Array.isArray(parsedData.flashcards)) {
+                   extractedCards = parsedData.flashcards;
+                } else if (parsedData && Array.isArray(parsedData.cards)) {
+                   extractedCards = parsedData.cards;
+                }
+             }
           } catch(e) {
              console.warn("Failed to parse JSON natively, trying regex fix...");
-             const objectMatch = cleanText.match(/\{[\s\S]*\}/);
-             if (objectMatch) {
-                try {
-                   parsedData = JSON.parse(objectMatch[0]);
-                } catch(e2) {
-                   throw new Error("JSON vỡ nát hoàn toàn, không thể phục hồi.");
-                }
-             } else {
-                throw new Error("Không lấy được chuỗi JSON hợp lệ từ AI.");
-             }
           }
 
-          let extractedCards = [];
-          if (Array.isArray(parsedData)) {
-             extractedCards = parsedData;
-          } else if (parsedData && Array.isArray(parsedData.flashcards)) {
-             extractedCards = parsedData.flashcards;
-          } else if (parsedData && Array.isArray(parsedData.cards)) {
-             extractedCards = parsedData.cards;
-          } else {
-             throw new Error("Không thể đúc kết mảng thẻ học từ JSON.");
+          if (extractedCards.length === 0) {
+             const cardObjects: any[] = [];
+             const blockRegex = /\{[^{}]*\}/g;
+             let blockMatch;
+
+             const parseField = (block: string, field: string): string => {
+               const regex = new RegExp('["\']' + field + '["\']\\s*:\\s*"((?:[^"\\\\\\]|\\\\.)*)"', "i");
+               const match = block.match(regex);
+               if (match && match[1]) {
+                 try {
+                   return JSON.parse('"' + match[1] + '"');
+                 } catch (e) {
+                   return match[1];
+                 }
+               }
+               return "";
+             };
+
+             while ((blockMatch = blockRegex.exec(cleanText)) !== null) {
+               const block = blockMatch[0];
+               const frontVal = parseField(block, "front");
+               const backVal = parseField(block, "back");
+               const expVal = parseField(block, "explanation");
+               const wfVal = parseField(block, "wordForm");
+               const ipaVal = parseField(block, "ipa");
+               const exVal = parseField(block, "example");
+               const origVal = parseField(block, "origin");
+
+               if (frontVal || backVal) {
+                 cardObjects.push({
+                   front: frontVal,
+                   back: backVal,
+                   explanation: expVal,
+                   wordForm: wfVal,
+                   ipa: ipaVal,
+                   example: exVal,
+                   origin: origVal,
+                 });
+               }
+             }
+
+             if (cardObjects.length > 0) {
+               extractedCards = cardObjects;
+               console.log(`Successfully recovered ${cardObjects.length} flashcards using backend fallback regex parser.`);
+             } else {
+               throw new Error("Không thể phục hồi hoặc phân tích cấu trúc dữ liệu thẻ bài học từ JSON.");
+             }
           }
 
           const actualCount = extractedCards.length;

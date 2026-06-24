@@ -745,7 +745,7 @@ Extract all items into the \`data\` array matching this exact vocabulary schema:
     setProgressText(`Đang truyền tải dữ liệu trực tiếp...`);
 
     // 2. Setup REST stream generate content endpoint
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?key=${securedKey}`;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?key=${securedKey}`;
 
     const response = await fetch(endpoint, {
       method: "POST",
@@ -800,7 +800,7 @@ ${textChunk}`,
 
     if (reader) {
       pushLog(
-        `📡 [Truyền tải V8.0] Đã thiết lập liên kết trực tiếp an toàn với Cloud Gemini [Lite Engine]...`,
+        `📡 [Truyền tải V8.0] Đã thiết lập liên kết trực tiếp an toàn với Cloud Gemini [Pro/Standard Engine]...`,
       );
       pushLog(
         `🍿 Mở đầu luồng dữ liệu thời gian thực cho Phân đoạn ${partIndex + 1}...`,
@@ -843,29 +843,55 @@ ${textChunk}`,
 
     const healedJsonStr = sanitizeAndHealJson(fullAccumulatedText);
     let parsedData: any = null;
+    let cardsArray: any[] = [];
 
     try {
       parsedData = JSON.parse(healedJsonStr);
+      if (parsedData) {
+        if (Array.isArray(parsedData)) {
+          cardsArray = parsedData;
+        } else if (Array.isArray(parsedData.cards)) {
+          cardsArray = parsedData.cards;
+        } else if (Array.isArray(parsedData.flashcards)) {
+          cardsArray = parsedData.flashcards;
+        }
+      }
     } catch (e) {
       pushLog(
         "⚠️ Trình vá cú pháp cao cấp tự vá JSON thất bại, khởi động cơ chế bóc tách Regex thô bạo...",
         true,
       );
+    }
+
+    if (cardsArray.length === 0) {
       const cardObjects: any[] = [];
-      const frontBackRegex =
-        /\{\s*"front"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"back"\s*:\s*"((?:[^"\\]|\\.)*)"(?:\s*,\s*"explanation"\s*:\s*"((?:[^"\\]|\\.)*)")?(?:\s*,\s*"wordForm"\s*:\s*"((?:[^"\\]|\\.)*)")?(?:\s*,\s*"ipa"\s*:\s*"((?:[^"\\]|\\.)*)")?(?:\s*,\s*"example"\s*:\s*"((?:[^"\\]|\\.)*)")?(?:\s*,\s*"origin"\s*:\s*"((?:[^"\\]|\\.)*)")?/gi;
+      const blockRegex = /\{[^{}]*\}/g;
+      let blockMatch;
 
-      let match;
-      while ((match = frontBackRegex.exec(healedJsonStr)) !== null) {
-        try {
-          const frontVal = JSON.parse(`"${match[1]}"`);
-          const backVal = JSON.parse(`"${match[2]}"`);
-          const expVal = match[3] ? JSON.parse(`"${match[3]}"`) : "";
-          const wfVal = match[4] ? JSON.parse(`"${match[4]}"`) : "";
-          const ipaVal = match[5] ? JSON.parse(`"${match[5]}"`) : "";
-          const exVal = match[6] ? JSON.parse(`"${match[6]}"`) : "";
-          const origVal = match[7] ? JSON.parse(`"${match[7]}"`) : "";
+      const parseField = (block: string, field: string): string => {
+        const regex = new RegExp(`["']${field}["']\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`, "i");
+        const match = block.match(regex);
+        if (match && match[1]) {
+          try {
+            return JSON.parse(`"${match[1]}"`);
+          } catch (e) {
+            return match[1];
+          }
+        }
+        return "";
+      };
 
+      while ((blockMatch = blockRegex.exec(healedJsonStr)) !== null) {
+        const block = blockMatch[0];
+        const frontVal = parseField(block, "front");
+        const backVal = parseField(block, "back");
+        const expVal = parseField(block, "explanation");
+        const wfVal = parseField(block, "wordForm");
+        const ipaVal = parseField(block, "ipa");
+        const exVal = parseField(block, "example");
+        const origVal = parseField(block, "origin");
+
+        if (frontVal || backVal) {
           cardObjects.push({
             front: frontVal,
             back: backVal,
@@ -875,13 +901,13 @@ ${textChunk}`,
             example: exVal,
             origin: origVal,
           });
-        } catch (err) {}
+        }
       }
 
       if (cardObjects.length > 0) {
-        parsedData = { cards: cardObjects };
+        cardsArray = cardObjects;
         pushLog(
-          `🛠️ Bóc tách thành công ${cardObjects.length} thẻ bằng Regex fallback.`,
+          `🛠️ Bóc tách thành công ${cardObjects.length} thẻ bằng Regex fallback siêu việt (không phụ thuộc thứ tự key).`,
         );
       } else {
         throw new Error(
@@ -890,8 +916,8 @@ ${textChunk}`,
       }
     }
 
-    if (parsedData && Array.isArray(parsedData.cards)) {
-      return parsedData.cards;
+    if (cardsArray && cardsArray.length > 0) {
+      return cardsArray;
     } else {
       throw new Error(
         "Mẫu dữ liệu bóc tách từ Google AI không đủ điều kiện phân mảng thẻ.",
