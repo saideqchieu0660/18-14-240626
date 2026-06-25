@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { createWorker } from "tesseract.js";
+import { v4 as uuidv4 } from "uuid";
 import {
   FileUp,
   FileText,
@@ -400,7 +401,7 @@ export default function DocumentConverter() {
     fetchUserAiQuota();
   }, [fetchUserAiQuota]);
 
-  const [concurrency, setConcurrency] = useState<number>(2);
+  const [concurrency, setConcurrency] = useState<number>(1);
   const [reviewPage, setReviewPage] = useState<number>(1);
 
   // Input states
@@ -1349,7 +1350,6 @@ ${textChunk}`,
 
         if (success) {
           task.status = "SUCCESS";
-          const { v4: uuidv4 } = await import("uuid");
           const filteredAndMapped: any[] = [];
           let duplicateSkipCount = 0;
 
@@ -1407,9 +1407,9 @@ ${textChunk}`,
           saveCheckpoint(completedCount);
 
           if (nextIndex < totalCount) {
-            const delayTime = concurrency > 1 ? 300 : 1500;
+            const delayTime = Math.floor(Math.random() * (18000 - 12000 + 1)) + 12000;
             pushLog(
-              `⏳ [Phần ${i + 1}] Giữ nhịp giãn cách API trong lọc ${delayTime / 1000}s...`,
+              `⏳ [Phần ${i + 1}] Giữ nhịp giãn cách API trong lọc ${delayTime / 1000}s (tránh Rate Limit)...`,
             );
             let cooldownProgress = delayTime;
             while (
@@ -1448,7 +1448,7 @@ ${textChunk}`,
           saveCheckpoint(completedCount);
 
           if (nextIndex < totalCount) {
-            const delayTime = concurrency > 1 ? 1000 : 3000;
+            const delayTime = Math.floor(Math.random() * (18000 - 12000 + 1)) + 12000;
             let cooldownProgress = delayTime;
             while (
               cooldownProgress > 0 &&
@@ -1588,7 +1588,6 @@ ${textChunk}`,
           });
 
           // Data handoff
-          const { v4: uuidv4 } = await import("uuid");
           const existingFrontsMap = getExistingCardFrontsMap();
           const filteredAndMapped: any[] = [];
           let duplicateSkipCount = 0;
@@ -2071,7 +2070,6 @@ ${textChunk}`,
         finalCards = parsedData;
       }
 
-      const { v4: uuidv4 } = await import("uuid");
       const mapped = finalCards.map((item: any, idx: number) => ({
         id: `card_json_${uuidv4()}_${idx}`,
         front: item.front || "",
@@ -2268,7 +2266,6 @@ ${textChunk}`,
     setError(null);
 
     try {
-      const { v4: uuidv4 } = await import("uuid");
       const deckId = `deck_${uuidv4()}`;
 
       // Luôn trích xuất trực tiếp từ Refs đồng bộ để bẻ gãy triệt để mọi closure trì hoãn hay delay state của React
@@ -2983,17 +2980,15 @@ Hoặc dán toàn bộ đoạn văn bài đọc IELTS/TOEFL vào đây. AI sẽ 
                           );
                           setEditingManualId(null);
                         } else {
-                          import("uuid").then(({ v4: uuidv4 }) => {
-                            setManualBatch((prev) => [
-                              ...prev,
-                              {
-                                id: `manual_${uuidv4()}`,
-                                front: manualFront.trim(),
-                                wordForm: manualWordForm.trim(),
-                                back: manualBack.trim(),
-                              },
-                            ]);
-                          });
+                          setManualBatch((prev) => [
+                            ...prev,
+                            {
+                              id: `manual_${uuidv4()}`,
+                              front: manualFront.trim(),
+                              wordForm: manualWordForm.trim(),
+                              back: manualBack.trim(),
+                            },
+                          ]);
                         }
 
                         setManualFront("");
@@ -3815,7 +3810,7 @@ Hoặc dán toàn bộ đoạn văn bài đọc IELTS/TOEFL vào đây. AI sẽ 
             >
               {currentCards.map((c, i) => (
                 <FlashcardItem
-                  key={c.id || `card-${startIndex + i}`}
+                  key={`card-${c.id || "no-id"}-${startIndex + i}`}
                   index={startIndex + i}
                   card={c}
                   onRemove={handleRemoveCard}

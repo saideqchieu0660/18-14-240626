@@ -1,4 +1,5 @@
 import React, { useState, useRef , useEffect , useMemo } from "react";
+import { v4 as uuidv4 } from "uuid";
 import {
   Copy,
   ExternalLink,
@@ -312,7 +313,6 @@ export default function ManualFlashcardImporter() {
 
       let currentBatchDeckId = savedPipeline?.deckId;
       if (!currentBatchDeckId) {
-        const { v4: uuidv4 } = await import("uuid");
         currentBatchDeckId = `deck_${uuidv4()}`;
       }
 
@@ -328,7 +328,6 @@ export default function ManualFlashcardImporter() {
         ? targetDeckForBatch.subject || "Tự chọn"
         : deckSubject || "Tự chọn";
 
-      const { v4: uuidv4 } = await import("uuid");
       const mappedBatch = cardsInChunk.map((card: any) => {
         const cardId = `card_${uuidv4()}`;
         return {
@@ -493,7 +492,6 @@ export default function ManualFlashcardImporter() {
 
         let currentBatchDeckId = savedPipeline?.deckId;
         if (!currentBatchDeckId) {
-          const { v4: uuidv4 } = await import("uuid");
           currentBatchDeckId = `deck_${uuidv4()}`;
         }
 
@@ -509,7 +507,6 @@ export default function ManualFlashcardImporter() {
           ? targetDeckForBatch.subject || "Tự chọn"
           : deckSubject || "Tự chọn";
 
-        const { v4: uuidv4 } = await import("uuid");
         const mappedBatch = cardsInChunk.map((card: any) => {
           const cardId = `card_${uuidv4()}`;
           return {
@@ -1058,7 +1055,6 @@ Acknowledge this protocol. Execute all text transformations deterministically at
       }
 
       finalRawLines = cleanedLines;
-      const { v4: uuidv4 } = await import("uuid");
       activeDeckId = `deck_${uuidv4()}`;
       startChunk = Math.max(0, startChunkInput - 1);
       accumulatedCards = [];
@@ -1079,8 +1075,6 @@ Acknowledge this protocol. Execute all text transformations deterministically at
     allLogsRef.current = [...initialLogs];
 
     try {
-      const { v4: uuidv4 } = await import("uuid");
-
       // CHUNKING & CONCURRENCY REFACTOR: Exact 20 cards per batch for 1000+ scale
       const lineCount = finalRawLines.length;
       // Using user-defined settings
@@ -1345,7 +1339,6 @@ Acknowledge this protocol. Execute all text transformations deterministically at
               ? targetDeckForBatch.subject || "Tự chọn"
               : subject || "Tự chọn";
 
-            const { v4: uuidv4 } = await import("uuid");
             const mappedBatch = cardsInChunk.map((card) => {
               const cardId = `card_${uuidv4()}`;
               return {
@@ -1553,7 +1546,6 @@ Acknowledge this protocol. Execute all text transformations deterministically at
     }
 
     try {
-      const { v4: uuidv4 } = await import("uuid");
       const deckId = `deck_${uuidv4()}`;
 
       const targetDeck =
