@@ -28,6 +28,7 @@ import {
   keyRegistry,
 } from "../utils/apiClient";
 import { AIPromptsEditorWidget } from "../components/AIPromptsEditorWidget";
+import { SystemLinksEditorWidget } from "../components/SystemLinksEditorWidget";
 import { useSystemConfig } from "../hooks/useSystemConfig";
 
 class MonitorErrorBoundary extends React.Component<
@@ -2331,6 +2332,9 @@ export default function ApiHealthMonitor() {
         <ServiceMonitor adminKey={adminKey} isOpen={true} />
         <div className="border-t border-zinc-200 dark:border-zinc-800 pt-8 mt-8">
           <AIPromptsEditorWidget />
+        </div>
+        <div className="border-t border-zinc-200 dark:border-zinc-800 pt-8 mt-8">
+          <SystemLinksEditorWidget />
         </div>
       </div>
     </div>

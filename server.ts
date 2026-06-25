@@ -2530,6 +2530,65 @@ ${reminderSuffix}`;
      return res.json({ groqEnabled: isGroqEnabled, openRouterEnabled: isOpenRouterEnabled, geminiEnabled: isGeminiEnabled, deepInfraEnabled: isDeepInfraEnabled }); 
    }); 
    
+   // --- SYSTEM LINKS ADMIN CONFIGURATIONS ---
+   let globalSystemLinks: any = {
+     aiStudioLink: "https://aistudio.google.com/app/prompts?state=%7B%22ids%22:%5B%221jzFwMi-W6UECeGyiZL5pwPy8j-kuL72x%22%5D,%22action%22:%22open%22,%22userId%22:%22101494878159029919274%22,%22resourceKeys%22:%7B%7D%7D&usp=sharing",
+     geminiLink: "https://gemini.google.com"
+   };
+   let lastSystemLinksFetchTime = 0;
+   
+   async function refreshSystemLinks() {
+     const now = Date.now();
+     if (now - lastSystemLinksFetchTime < 15000) return;
+     lastSystemLinksFetchTime = now;
+     try {
+       if (admin.apps.length > 0) {
+         const db = admin.firestore();
+         const doc = await db.collection("system_config").doc("system_links").get();
+         if (doc.exists) {
+           globalSystemLinks = { ...globalSystemLinks, ...doc.data() };
+         }
+       }
+     } catch (err) {
+       console.error("[System Links Config] Error refreshing from Firestore:", err);
+     }
+   }
+   
+   app.get("/api/admin/system-links", async (req, res) => {
+     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+     res.setHeader("Pragma", "no-cache");
+     res.setHeader("Expires", "0");
+     await refreshSystemLinks();
+     return res.json({
+       success: true,
+       data: globalSystemLinks || {}
+     });
+   });
+   
+   app.post("/api/admin/system-links", express.json(), async (req, res) => {
+     const isAllowed = await checkAdminAuth(req);
+     if (!isAllowed) {
+       return res.status(403).json({ error: "Thao tác không hợp lệ. Sai admin key." });
+     }
+     const payload = req.body;
+     try {
+       if (admin.apps.length > 0) {
+         const db = admin.firestore();
+         await db.collection("system_config").doc("system_links").set({
+           ...payload,
+           updatedAt: new Date().toISOString()
+         }, { merge: true });
+         globalSystemLinks = { ...globalSystemLinks, ...payload };
+         return res.json({ success: true, message: "Cập nhật System Links thành công." });
+       } else {
+         return res.status(500).json({ error: "Lỗi kết nối cơ sở dữ liệu." });
+       }
+     } catch (err) {
+       console.error("Error saving System Links:", err);
+       return res.status(500).json({ error: "Lỗi server khi lưu System Links." });
+     }
+   });
+
    // --- AI PROMPTS DIRECT ADMIN CONFIGURATIONS ---
    let globalAIPrompts: any = null;
    let lastAIPromptsFetchTime = 0;

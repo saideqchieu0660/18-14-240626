@@ -247,7 +247,7 @@ export default function DocumentConverter() {
   const isPausedRef = useRef<boolean>(false);
   const [activeImportTab, setActiveImportTab] = useState<
     "file" | "text" | "json" | "manual"
-  >("file");
+  >("manual");
   const [manualFront, setManualFront] = useState("");
   const [manualWordForm, setManualWordForm] = useState("");
   const [manualBack, setManualBack] = useState("");
@@ -291,6 +291,18 @@ export default function DocumentConverter() {
   const [isAiSystemBusy, setIsAiSystemBusy] = useState(false);
   const [aiBusyType, setAiBusyType] = useState<string | null>(null);
   const [streamedBytes, setStreamedBytes] = useState<number>(0);
+  const [systemLinks, setSystemLinks] = useState<{aiStudioLink?: string, geminiLink?: string} | null>(null);
+
+  useEffect(() => {
+    fetch("/api/admin/system-links")
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.data) {
+          setSystemLinks(data.data);
+        }
+      })
+      .catch(err => console.error("Failed to fetch system links:", err));
+  }, []);
 
   useEffect(() => {
     const checkBusy = () => {
@@ -431,75 +443,12 @@ export default function DocumentConverter() {
   const [splitDeckSize, setSplitDeckSize] = useState<number>(40);
 
   const [showBypassModal, setShowBypassModal] = useState(false);
+  const [showApiDownOverlay, setShowApiDownOverlay] = useState(false);
   const [toastSuccessMessage, setToastSuccessMessage] = useState<string | null>(
     null,
   );
 
-  const LAZY_CHUNK_PROMPT = `
-# SYSTEM PROMPT: REFACTOR TO LAZY-CHUNKED JSON CONVERSION ENGINE
 
-## 1. CORE ROLE & DETERMINISTIC CONTRACT
-You are a deterministic Multimodal Data Extraction Agent. Your sole purpose is to convert content from long, high-density images or text blocks into structured JSON.
-- **Temperature Setting:** Strictly executed at \`temperature = 0\`. No creativity allowed.
-- **Output Constraint:** Output MUST be a valid JSON object. Do not wrap in markdown \`\`\`json blocks if the API enforces JSON mode, otherwise return ONLY the raw JSON structure. No conversational prose.
-
-## 2. LAZY CHUNKING & PROGRESS TRACKING (CRITICAL)
-Due to context window limits and token output throttling on massive images, you must employ a "Lazy Chunking" strategy across multiple turns.
-- You must dynamically divide the total visual content into smaller, logical batches (Chunks).
-- At the very beginning of the JSON response payload, you MUST inject a strict progress tracking metadata node using double slashes \`//\` inside the key string to signal the processing state to the frontend parser.
-
-### PROGRESS METADATA SCHEMA SCHEMA
-The first keys in the root JSON object must strictly follow this syntax:
-{
-  "//_PROGRESS_STATUS": "Processing Chunk X out of Y",
-  "//_CURRENT_CHUNK": X,
-  "//_TOTAL_CHUNKS": Y,
-  "//_HAS_MORE": true/false,
-  "data": [ ... ]
-}
-
-## 3. MULTI-TURN CONTINUATION LOGIC
-- **If \`//_HAS_MORE\` is \`true\`:** The frontend will automatically reply with a prompt like "Continue next chunk". You must remember the exact historical boundary from the previous turn and resume processing the next sequence of vocabulary without skipping a single word.
-- **If \`//_HAS_MORE\` is \`false\`:** This signifies that the entire document/image has been fully extracted and successfully converted.
-
-## 4. INGESTION DATA TARGET SCHEMA
-Extract all items into the \`data\` array matching this exact vocabulary schema:
-{
-  "data": [
-    {
-      "front": "English word, phrasal verb, collocation, or idiom",
-      "back": "Exact Vietnamese meaning and definitions",
-      "example": "Accompanying English example sentence (if none exists, extract the contextual sentence containing it)",
-      "category": "The specific classified group/topic section name from the source document"
-    }
-  ]
-}
-
-## 5. EXECUTION GUARDRAILS
-1. **Zero Text Omission:** Do NOT skip any word. Extract line-by-line, section-by-section.
-2. **Noise Filtering:** Ignore conversational flavor text or headers that do not contain actual flashcard data (e.g., system logs, chat greetings).
-3. If the document is too massive to predict \`Y\` (Total Chunks) accurately, set a safe estimated \`Y\` or set \`Y\` dynamically, but tracking \`X\` (Current Chunk) sequentially is non-negotiable.
-`.trim();
-
-  const handleCopyPromptAndGoToGemini = async () => {
-    try {
-      await navigator.clipboard.writeText(LAZY_CHUNK_PROMPT);
-      setToastSuccessMessage("Đã copy prompt thành công!");
-      setTimeout(() => {
-        setToastSuccessMessage(null);
-      }, 3500);
-      window.open("https://gemini.google.com", "_blank");
-    } catch (err) {
-      console.error("Lỗi khi sao chép prompt:", err);
-    }
-  };
-
-  const handleGoToAIStudio = () => {
-    window.open(
-      "https://aistudio.google.com/app/prompts?state=%7B%22ids%22:%5B%221jzFwMi-W6UECeGyiZL5pwPy8j-kuL72x%22%5D,%22action%22:%22open%22,%22userId%22:%22101494878159029919274%22,%22resourceKeys%22:%7B%7D%7D&usp=sharing",
-      "_blank",
-    );
-  };
 
   // Synchronous Refs to eliminate stale React closures of settings
   const isSplitDeckEnabledRef = useRef(isSplitDeckEnabled);
@@ -955,7 +904,7 @@ ${textChunk}`,
               setActiveSession(parsed);
               setDeckTitle(parsed.deckTitle || "");
               setDeckSubject(parsed.deckSubject || "");
-              setActiveImportTab(parsed.importTab || "file");
+              setActiveImportTab((parsed.importTab === "file" || parsed.importTab === "text") && store.getCurrentUser()?.role !== "admin" ? "manual" : (parsed.importTab || "manual"));
               if (
                 parsed.allGeneratedCards &&
                 parsed.allGeneratedCards.length > 0
@@ -2685,28 +2634,40 @@ ${textChunk}`,
       <div className="grid grid-cols-2 sm:grid-cols-4 p-1.5 bg-zinc-50 dark:bg-zinc-900/60 rounded-2xl border border-zinc-200/60 dark:border-zinc-800/50 gap-1">
         <button
           onClick={() => {
-            if (!isProcessing) setActiveImportTab("file");
+            if (store.getCurrentUser()?.role === "admin") {
+              if (!isProcessing) setActiveImportTab("file");
+            } else {
+              setShowApiDownOverlay(true);
+            }
           }}
           disabled={isProcessing}
           className={cn(
             "py-2.5 px-3 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-1.5 border-none",
             activeImportTab === "file"
               ? "bg-white dark:bg-zinc-805 text-orange-600 dark:text-orange-450 shadow-sm"
-              : "text-zinc-500 hover:text-zinc-850 dark:hover:text-zinc-300 disabled:opacity-40",
+              : store.getCurrentUser()?.role !== "admin"
+              ? "opacity-40 hover:opacity-60 bg-zinc-200/50 dark:bg-zinc-800/50 text-zinc-500"
+              : "text-zinc-500 hover:text-zinc-850 dark:hover:text-zinc-300 disabled:opacity-40"
           )}
         >
           <FileText className="w-4 h-4" /> 📁 FILE / IMAGE
         </button>
         <button
           onClick={() => {
-            if (!isProcessing) setActiveImportTab("text");
+            if (store.getCurrentUser()?.role === "admin") {
+              if (!isProcessing) setActiveImportTab("text");
+            } else {
+              setShowApiDownOverlay(true);
+            }
           }}
           disabled={isProcessing}
           className={cn(
             "py-2.5 px-3 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-1.5 border-none",
             activeImportTab === "text"
               ? "bg-white dark:bg-zinc-805 text-orange-600 dark:text-orange-450 shadow-sm"
-              : "text-zinc-500 hover:text-zinc-850 dark:hover:text-zinc-300 disabled:opacity-40",
+              : store.getCurrentUser()?.role !== "admin"
+              ? "opacity-40 hover:opacity-60 bg-zinc-200/50 dark:bg-zinc-800/50 text-zinc-500"
+              : "text-zinc-500 hover:text-zinc-850 dark:hover:text-zinc-300 disabled:opacity-40"
           )}
         >
           <span className="text-sm">✍️</span> VĂN BẢN THÔ
@@ -2883,7 +2844,13 @@ Hoặc dán toàn bộ đoạn văn bài đọc IELTS/TOEFL vào đây. AI sẽ 
                 </button>
                 <button
                   type="button"
-                  onClick={onParseJsonAiClick}
+                  onClick={() => {
+                    if (store.getCurrentUser()?.role === "admin") {
+                      onParseJsonAiClick();
+                    } else {
+                      setShowApiDownOverlay(true);
+                    }
+                  }}
                   disabled={isProcessing || !jsonPasteInput.trim()}
                   className={cn(
                     "py-2.5 px-4 text-xs font-black rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5",
@@ -3036,7 +3003,13 @@ Hoặc dán toàn bộ đoạn văn bài đọc IELTS/TOEFL vào đây. AI sẽ 
                           </label>
                           <button
                             type="button"
-                            onClick={handleGenerateManualBack}
+                            onClick={() => {
+                              if (store.getCurrentUser()?.role === "admin") {
+                                handleGenerateManualBack();
+                              } else {
+                                setShowApiDownOverlay(true);
+                              }
+                            }}
                             disabled={
                               isGeneratingManualAi || !manualFront.trim()
                             }
@@ -3824,6 +3797,44 @@ Hoặc dán toàn bộ đoạn văn bài đọc IELTS/TOEFL vào đây. AI sẽ 
 
       {/* Bypass Modal Dialog */}
       <AnimatePresence>
+        {showApiDownOverlay && (
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-red-950/80 backdrop-blur-md cursor-pointer"
+              onClick={() => setShowApiDownOverlay(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 30 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 30 }}
+              className="relative w-full max-w-lg bg-zinc-950 border border-red-800 rounded-3xl p-6 md:p-8 shadow-2xl z-10 space-y-6 text-center"
+            >
+              <div className="mx-auto w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center">
+                <AlertTriangle className="w-8 h-8 text-red-500" />
+              </div>
+              <h3 className="text-xl font-bold text-red-500 font-display uppercase tracking-tight">
+                SỰ CỐ HỆ THỐNG API
+              </h3>
+              <p className="text-sm text-zinc-300 leading-relaxed">
+                Hệ thống API đã sập do bị tấn công bởi mã độc. Các chức năng trích xuất tự động bằng AI sẽ không hoạt động đối với tài khoản thường.
+                <br /><br />
+                Vui lòng sử dụng tính năng <strong>Dán chuỗi JSON</strong> hoặc <strong>Nhập thủ công</strong>.
+              </p>
+              <button
+                onClick={() => setShowApiDownOverlay(false)}
+                className="w-full py-3 px-4 text-sm font-bold rounded-xl bg-red-600 hover:bg-red-700 transition cursor-pointer text-white active:scale-98"
+              >
+                Đã hiểu
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {showBypassModal && (
           <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
             {/* Blurred dark overlay backdrop */}
@@ -3864,9 +3875,11 @@ Hoặc dán toàn bộ đoạn văn bài đọc IELTS/TOEFL vào đây. AI sẽ 
               </div>
 
               <div className="space-y-4">
-                {/* Option A Box */}
+                {/* Chatbot Fallback Box */}
                 <div
-                  onClick={handleGoToAIStudio}
+                  onClick={() => {
+                    window.open(systemLinks?.chatbotLink || "https://gemini.google.com", "_blank");
+                  }}
                   className="group cursor-pointer p-4 rounded-2xl border border-zinc-200/80 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-zinc-900/30 hover:border-orange-500/50 hover:bg-orange-500/5 dark:hover:bg-orange-500/5 transition-all text-left flex gap-4"
                 >
                   <div className="w-10 h-10 rounded-xl bg-orange-500/10 text-orange-600 dark:text-orange-400 flex items-center justify-center shrink-0">
@@ -3875,37 +3888,14 @@ Hoặc dán toàn bộ đoạn văn bài đọc IELTS/TOEFL vào đây. AI sẽ 
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 justify-between">
                       <h4 className="font-bold text-xs text-zinc-800 dark:text-zinc-200 group-hover:text-orange-600 dark:group-hover:text-orange-450">
-                        Sử dụng Google AI Studio (Yêu cầu &gt;18 tuổi)
+                        Sử dụng Bot Hỗ Trợ JSON Thông Minh
                       </h4>
                       <span className="text-[9px] shrink-0 text-orange-600 dark:text-orange-450 font-black bg-orange-500/10 px-1.5 py-0.5 rounded leading-none">
-                        Cực nhạy
+                        Khuyên dùng
                       </span>
                     </div>
-                    <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-1.5 leading-relaxed">
-                      Làm việc trực tiếp trên Playground của Google AI. Giao
-                      diện trực quan, không lo bị nghẽn hay trễ kết nối mạng.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Option B Box */}
-                <div
-                  onClick={handleCopyPromptAndGoToGemini}
-                  className="group cursor-pointer p-4 rounded-2xl border border-zinc-200/80 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-zinc-900/30 hover:border-emerald-500/50 hover:bg-emerald-500/5 dark:hover:bg-emerald-500/5 transition-all text-left flex gap-4"
-                >
-                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-                    <Copy className="w-5 h-5 group-hover:animate-bounce" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 justify-between">
-                      <h4 className="font-bold text-xs text-zinc-800 dark:text-zinc-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
-                        Sao chép Prompt &amp; Chuyển sang Gemini Web
-                      </h4>
-                    </div>
-                    <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-1.5 leading-relaxed">
-                      Hệ thống tự động sao chép prompt tối ưu dán sẵn vào khay
-                      bộ nhớ đệm (Clipboard) rồi định tuyến ngài sang Gemini Web
-                      để nhận phản hồi JSON có ngay lập tức.
+                    <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-1.5 leading-relaxed whitespace-pre-wrap">
+                      {systemLinks?.chatbotDescription || "Chuyển sang Bot AI đã được cấu hình sẵn để xử lý văn bản, ảnh thành định dạng JSON chuẩn."}
                     </p>
                   </div>
                 </div>
