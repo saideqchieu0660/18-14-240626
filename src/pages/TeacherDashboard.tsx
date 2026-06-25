@@ -47,7 +47,9 @@ import ApiHealthMonitor from "./ApiHealthMonitor";
 import { OfflineStorageProgressWidget } from "../components/OfflineStorageProgressWidget";
 
 export default function TeacherDashboard() {
-  const [showAdminMonitor, setShowAdminMonitor] = useState(false);
+  const [showAdminMonitor, setShowAdminMonitor] = useState(() => {
+    return new URLSearchParams(window.location.search).get("monitor") === "true";
+  });
 
   useEffect(() => {
     document.title = "Henosis - Teacher Dashboard";

@@ -248,6 +248,13 @@ export default function DocumentConverter() {
   const [activeImportTab, setActiveImportTab] = useState<
     "file" | "text" | "json" | "manual"
   >("manual");
+
+  const checkIsAdmin = () => {
+    const user = store.getCurrentUser();
+    if (!user) return false;
+    const role = user.role?.trim().toLowerCase();
+    return role === "admin" || role === "teacher";
+  };
   const [manualFront, setManualFront] = useState("");
   const [manualWordForm, setManualWordForm] = useState("");
   const [manualBack, setManualBack] = useState("");
@@ -904,7 +911,8 @@ ${textChunk}`,
               setActiveSession(parsed);
               setDeckTitle(parsed.deckTitle || "");
               setDeckSubject(parsed.deckSubject || "");
-              setActiveImportTab((parsed.importTab === "file" || parsed.importTab === "text") && store.getCurrentUser()?.role !== "admin" ? "manual" : (parsed.importTab || "manual"));
+              const isAdmin = checkIsAdmin();
+              setActiveImportTab((parsed.importTab === "file" || parsed.importTab === "text") && !isAdmin ? "manual" : (parsed.importTab || "manual"));
               if (
                 parsed.allGeneratedCards &&
                 parsed.allGeneratedCards.length > 0
@@ -2634,7 +2642,8 @@ ${textChunk}`,
       <div className="grid grid-cols-2 sm:grid-cols-4 p-1.5 bg-zinc-50 dark:bg-zinc-900/60 rounded-2xl border border-zinc-200/60 dark:border-zinc-800/50 gap-1">
         <button
           onClick={() => {
-            if (store.getCurrentUser()?.role === "admin") {
+            const isAdmin = checkIsAdmin();
+            if (isAdmin) {
               if (!isProcessing) setActiveImportTab("file");
             } else {
               setShowApiDownOverlay(true);
@@ -2645,7 +2654,7 @@ ${textChunk}`,
             "py-2.5 px-3 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-1.5 border-none",
             activeImportTab === "file"
               ? "bg-white dark:bg-zinc-805 text-orange-600 dark:text-orange-450 shadow-sm"
-              : store.getCurrentUser()?.role !== "admin"
+              : !checkIsAdmin()
               ? "opacity-40 hover:opacity-60 bg-zinc-200/50 dark:bg-zinc-800/50 text-zinc-500"
               : "text-zinc-500 hover:text-zinc-850 dark:hover:text-zinc-300 disabled:opacity-40"
           )}
@@ -2654,7 +2663,8 @@ ${textChunk}`,
         </button>
         <button
           onClick={() => {
-            if (store.getCurrentUser()?.role === "admin") {
+            const isAdmin = checkIsAdmin();
+            if (isAdmin) {
               if (!isProcessing) setActiveImportTab("text");
             } else {
               setShowApiDownOverlay(true);
@@ -2665,7 +2675,7 @@ ${textChunk}`,
             "py-2.5 px-3 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-1.5 border-none",
             activeImportTab === "text"
               ? "bg-white dark:bg-zinc-805 text-orange-600 dark:text-orange-450 shadow-sm"
-              : store.getCurrentUser()?.role !== "admin"
+              : !checkIsAdmin()
               ? "opacity-40 hover:opacity-60 bg-zinc-200/50 dark:bg-zinc-800/50 text-zinc-500"
               : "text-zinc-500 hover:text-zinc-850 dark:hover:text-zinc-300 disabled:opacity-40"
           )}
@@ -2845,7 +2855,8 @@ Hoặc dán toàn bộ đoạn văn bài đọc IELTS/TOEFL vào đây. AI sẽ 
                 <button
                   type="button"
                   onClick={() => {
-                    if (store.getCurrentUser()?.role === "admin") {
+                    const isAdmin = checkIsAdmin();
+                    if (isAdmin) {
                       onParseJsonAiClick();
                     } else {
                       setShowApiDownOverlay(true);
@@ -3004,7 +3015,8 @@ Hoặc dán toàn bộ đoạn văn bài đọc IELTS/TOEFL vào đây. AI sẽ 
                           <button
                             type="button"
                             onClick={() => {
-                              if (store.getCurrentUser()?.role === "admin") {
+                              const isAdmin = checkIsAdmin();
+                              if (isAdmin) {
                                 handleGenerateManualBack();
                               } else {
                                 setShowApiDownOverlay(true);
@@ -3890,9 +3902,22 @@ Hoặc dán toàn bộ đoạn văn bài đọc IELTS/TOEFL vào đây. AI sẽ 
                       <h4 className="font-bold text-xs text-zinc-800 dark:text-zinc-200 group-hover:text-orange-600 dark:group-hover:text-orange-450">
                         Sử dụng Bot Hỗ Trợ JSON Thông Minh
                       </h4>
-                      <span className="text-[9px] shrink-0 text-orange-600 dark:text-orange-450 font-black bg-orange-500/10 px-1.5 py-0.5 rounded leading-none">
-                        Khuyên dùng
-                      </span>
+                      <div className="flex gap-1.5 items-center">
+                        {checkIsAdmin() && (
+                          <div 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.location.href = "/teacher?monitor=true";
+                            }}
+                            className="p-1 hover:bg-orange-500/10 rounded" title="Edit Link in Monitor"
+                          >
+                            <Settings className="w-3.5 h-3.5 text-zinc-400 hover:text-orange-500" />
+                          </div>
+                        )}
+                        <span className="text-[9px] shrink-0 text-orange-600 dark:text-orange-450 font-black bg-orange-500/10 px-1.5 py-0.5 rounded leading-none">
+                          Khuyên dùng
+                        </span>
+                      </div>
                     </div>
                     <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-1.5 leading-relaxed whitespace-pre-wrap">
                       {systemLinks?.chatbotDescription || "Chuyển sang Bot AI đã được cấu hình sẵn để xử lý văn bản, ảnh thành định dạng JSON chuẩn."}
